@@ -254,7 +254,16 @@
           query = query.order("created_at", { ascending: false }).order("id", { ascending: true });
       }
 
-      const { data, error, count } = await query.range(from, to);
+      const {data,error,count} = await Promise.race([
+        query.range(from, to),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error("Превышено время ожидания Supabase")),
+            10000
+          )
+        )
+      ]);
+      
       if (sequence !== requestSequence) return;
       if (error) throw error;
 
