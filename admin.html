@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080808">
+  <meta name="description" content="Закрытая панель управления каталогом RUSTOCK.">
+  <title>RUSTOCK/ADMIN</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="admin.js" defer></script>
+</head>
+<body>
+  <main class="admin-page">
+    <header class="admin-top">
+      <a class="brand" href="./">RUSTOCK</a>
+      <a href="./">← Back</a>
+    </header>
+
+    <section id="auth-section" class="auth-wrap">
+      <div class="admin-heading">
+        <p class="eyebrow">RUSTOCK / PRIVATE AREA</p>
+        <h1>Admin panel</h1>
+      </div>
+      <form id="login-form" class="panel">
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" type="email" autocomplete="username" required>
+        </div>
+        <div class="field" style="margin-top:14px">
+          <label for="password">Password</label>
+          <input id="password" type="password" autocomplete="current-password" required>
+        </div>
+        <div class="button-row"><button class="button" type="submit">Войти</button></div>
+        <p id="login-message" class="admin-message" role="status"></p>
+      </form>
+    </section>
+
+    <section id="dashboard-section" hidden>
+      <div class="admin-heading">
+        <p class="eyebrow">RUSTOCK / MANAGEMENT</p>
+        <h1>Управление товарами</h1>
+        <p>Добавляйте фотографии, заполняйте описание и характеристики. Изменения сразу появятся в публичном каталоге.</p>
+        <div class="button-row"><button id="logout-button" class="button secondary" type="button">Выйти</button></div>
+      </div>
+
+      <form id="product-form" class="panel">
+        <h2 id="form-title">Добавить товар</h2>
+        <input id="product-id" type="hidden">
+        <div class="form-grid">
+          <div class="field">
+            <label for="name">Название *</label>
+            <input id="name" maxlength="120" required placeholder="Например, Nike Tech Fleece">
+          </div>
+          <div class="field">
+            <label for="price">Цена в рублях *</label>
+            <input id="price" type="number" min="0" step="1" required placeholder="12990">
+          </div>
+          <div class="field full">
+            <label for="description">Подробное описание</label>
+            <textarea id="description" maxlength="5000" placeholder="Материал, посадка, состояние, особенности…"></textarea>
+          </div>
+          <div class="field full">
+            <label for="characteristics">Характеристики (по одной на строку: Название: значение)</label>
+            <textarea id="characteristics" placeholder="Размер: M&#10;Цвет: Чёрный&#10;Материал: Хлопок"></textarea>
+            <small>Например: «Размер: M». Не вводите сюда конфиденциальную информацию.</small>
+          </div>
+          <div class="field full">
+            <label for="images">Фотографии товара</label>
+            <input id="images" type="file" accept="image/jpeg,image/png,image/webp,image/avif" multiple>
+            <small>Можно выбрать несколько изображений. Максимум 8 файлов за раз, до 8 МБ каждый. Форматы JPG, PNG, WEBP, AVIF. Большие фото автоматически уменьшаются и по возможности конвертируются в WebP.</small>
+          </div>
+          <div class="field full">
+            <span class="field-label">Текущие фотографии</span>
+            <div id="current-images" class="current-image-list"><span class="muted">Сначала выберите товар для редактирования.</span></div>
+          </div>
+          <div class="field full">
+            <label class="checkbox-line"><input id="available" type="checkbox" checked> Товар есть в наличии</label>
+          </div>
+        </div>
+        <div class="button-row">
+          <button id="save-button" class="button" type="submit">Сохранить товар</button>
+          <button id="reset-button" class="button secondary" type="button">Очистить форму</button>
+        </div>
+        <p id="form-message" class="admin-message" role="status"></p>
+      </form>
+
+      <section class="panel">
+        <h2>Каталог товаров</h2>
+        <div id="admin-products" class="admin-products"><p class="muted">Загрузка…</p></div>
+        <nav id="admin-pagination" class="catalog-pagination admin-pagination" aria-label="Страницы списка товаров" hidden></nav>
+        <p id="list-message" class="admin-message" role="status"></p>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

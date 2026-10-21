@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080808">
+  <meta name="description" content="RUSTOCK — каталог одежды и streetwear. Просматривайте товары, фотографии, цены и наличие.">
+  <meta name="robots" content="index,follow">
+  <title>RUSTOCK</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="./" aria-label="RUSTOCK">RUSTOCK</a>
+    <img class="logo" src="assets/logo.png" alt="" width="64" height="44">
+  </header>
+
+  <main class="page">
+    <section class="intro">
+      <p class="eyebrow">RUSTOCK / CATALOG</p>
+      <h1>items catalog</h1>
+    </section>
+
+    <section class="catalog-controls" aria-label="Поиск и фильтры">
+      <label class="search-box">
+        <span class="search-icon" aria-hidden="true"></span>
+        <span class="visually-hidden">Поиск товаров</span>
+        <input id="search" type="search" placeholder="Поиск..." autocomplete="off" enterkeyhint="search">
+      </label>
+      <div class="filter-row">
+        <div class="catalog-tabs" role="group" aria-label="Наличие">
+          <button class="tab active" data-filter="all" type="button">Все товары</button>
+          <button class="tab" data-filter="available" type="button">В наличии</button>
+          <button class="tab" data-filter="order" type="button">Под заказ</button>
+        </div>
+        <label class="sort-control">
+          <span class="visually-hidden">Сортировка</span>
+          <select id="sort">
+            <option value="newest">Сначала новые</option>
+            <option value="price-asc">Сначала дешевле</option>
+            <option value="price-desc">Сначала дороже</option>
+            <option value="name">По названию</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <div class="results-line">
+      <span id="results-count">Загрузка каталога…</span>
+      <button id="clear-filters" class="text-button" type="button" hidden>Сбросить фильтры</button>
+    </div>
+
+    <div id="products" class="products" aria-live="polite" aria-busy="true"></div>
+    <nav id="catalog-pagination" class="catalog-pagination" aria-label="Страницы каталога" hidden></nav>
+    <section id="empty-state" class="empty-state" hidden>
+      <h2>Ничего не найдено</h2>
+      <p class="muted">Попробуйте изменить запрос или фильтры</p>
+    </section>
+    <p id="status-message" class="status-message" role="status"></p>
+  </main>
+
+  <dialog id="product-dialog" class="product-dialog" aria-label="Информация о товаре">
+    <button id="close-dialog" class="close-button" type="button" aria-label="Закрыть">×</button>
+    <div id="product-details"></div>
+  </dialog>
+
+  <footer class="site-footer">
+    <span>RUSTOCK</span>
+    <a href="admin.html" class="admin-entry">@rustockh</a>
+  </footer>
+</body>
+</html>
