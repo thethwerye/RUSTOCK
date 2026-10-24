@@ -126,6 +126,102 @@
     });
   }
 
+  function openImageLightbox(images, startIndex, productName) {
+  if (!Array.isArray(images) || !images.length) return;
+
+  let lightbox = document.getElementById("image-lightbox");
+
+  if (!lightbox) {
+    lightbox = document.createElement("dialog");
+    lightbox.id = "image-lightbox";
+    lightbox.className = "image-lightbox";
+    lightbox.setAttribute("aria-label", "Просмотр фотографий");
+
+    lightbox.innerHTML = `
+      <button class="image-lightbox-close" type="button"
+        aria-label="Закрыть фотографию">×</button>
+
+      <button class="image-lightbox-prev" type="button"
+        aria-label="Предыдущее фото">‹</button>
+
+      <img class="image-lightbox-image" alt="">
+
+      <button class="image-lightbox-next" type="button"
+        aria-label="Следующее фото">›</button>
+
+      <div class="image-lightbox-counter"></div>
+    `;
+
+    document.body.appendChild(lightbox);
+
+    lightbox.querySelector(".image-lightbox-close")
+      .addEventListener("click", () => lightbox.close());
+
+    lightbox.querySelector(".image-lightbox-prev")
+      .addEventListener("click", () => {
+        lightbox._index =
+          (lightbox._index - 1 + lightbox._images.length)
+          % lightbox._images.length;
+        updateLightbox();
+      });
+
+    lightbox.querySelector(".image-lightbox-next")
+      .addEventListener("click", () => {
+        lightbox._index =
+          (lightbox._index + 1) % lightbox._images.length;
+        updateLightbox();
+      });
+
+    lightbox.addEventListener("click", event => {
+      if (event.target === lightbox) lightbox.close();
+    });
+
+    lightbox.addEventListener("keydown", event => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        lightbox.querySelector(".image-lightbox-prev").click();
+      }
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        lightbox.querySelector(".image-lightbox-next").click();
+      }
+    });
+  }
+
+  lightbox._images = images;
+  lightbox._index = Math.max(
+    0,
+    Math.min(startIndex, images.length - 1)
+  );
+  lightbox._productName = productName || "Товар";
+
+  function updateLightbox() {
+    const image = lightbox.querySelector(".image-lightbox-image");
+    const counter = lightbox.querySelector(".image-lightbox-counter");
+
+    image.src = lightbox._images[lightbox._index];
+    image.alt =
+      `${lightbox._productName} — фото ${lightbox._index + 1}`;
+
+    counter.textContent =
+      `${lightbox._index + 1} / ${lightbox._images.length}`;
+
+    const multiple = lightbox._images.length > 1;
+    lightbox.querySelector(".image-lightbox-prev").hidden = !multiple;
+    lightbox.querySelector(".image-lightbox-next").hidden = !multiple;
+    counter.hidden = !multiple;
+  }
+
+  updateLightbox();
+
+  if (typeof lightbox.showModal === "function") {
+    if (!lightbox.open) lightbox.showModal();
+  } else {
+    lightbox.setAttribute("open", "");
+  }
+}
+
   function openProduct(product) {
     const images = Array.isArray(product.images) ? product.images.filter(Boolean) : [];
     const characteristics = product.characteristics && typeof product.characteristics === "object"
@@ -189,6 +285,20 @@
     detailsEl.querySelector(".detail-gallery-prev")?.addEventListener("click", () => showImage(currentIndex - 1));
     detailsEl.querySelector(".detail-gallery-next")?.addEventListener("click", () => showImage(currentIndex + 1));
     thumbnails.forEach(button => button.addEventListener("click", () => showImage(Number(button.dataset.index))));
+    if (mainImage && images.length) {
+      mainImage.setAttribute("role", "button");
+      mainImage.setAttribute("tabindex", "0");
+      mainImage.setAttribute("aria-label", "Открыть фотографию крупнее");
+      mainImage.addEventListener("click", () =>
+        openImageLightbox(images, currentIndex, product.name)
+      );
+      mainImage.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openImageLightbox(images, currentIndex, product.name);
+        }
+      });
+    }
 
     if (gallery && images.length > 1) {
       let touchStartX = 0;
