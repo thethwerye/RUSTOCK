@@ -45,6 +45,25 @@
     ? `<img class="product-image" src="${escapeHTML(url)}" alt="${escapeHTML(alt)}" loading="lazy" decoding="async">`
     : `<div class="image-placeholder">RUSTOCK</div>`;
 
+    function getImageUrl(url) {
+    if (!url) return "";
+
+    try {
+      const imageUrl = new URL(url);
+      const originalHost = "spocaiwbpxwwfymmhdon.supabase.co";
+      const workerUrl = new URL(config.SUPABASE_URL);
+
+      if (imageUrl.hostname === originalHost) {
+        imageUrl.protocol = workerUrl.protocol;
+        imageUrl.host = workerUrl.host;
+      }
+
+      return imageUrl.href;
+    } catch {
+      return url;
+    }
+  }
+
   function safeSearchTerm(value) {
     // Remove PostgREST filter syntax and wildcard characters from user input.
     return String(value || "")
@@ -87,7 +106,7 @@
   function renderProducts() {
     productsEl.innerHTML = pageProducts.map(product => {
       const images = Array.isArray(product.images) ? product.images : [];
-      const firstImage = images[0] || "";
+      const firstImage = getImageUrl(images[0] || "");
       return `
         <article class="product-card" tabindex="0" role="button" data-id="${escapeHTML(product.id)}" aria-label="Открыть ${escapeHTML(product.name)}">
           <div class="product-image-wrap">
@@ -200,7 +219,7 @@
     const image = lightbox.querySelector(".image-lightbox-image");
     const counter = lightbox.querySelector(".image-lightbox-counter");
 
-    image.src = lightbox._images[lightbox._index];
+    image.src = getImageUrl(lightbox._images[lightbox._index]);
     image.alt =
       `${lightbox._productName} — фото ${lightbox._index + 1}`;
 
@@ -223,7 +242,9 @@
 }
 
   function openProduct(product) {
-    const images = Array.isArray(product.images) ? product.images.filter(Boolean) : [];
+    const images = Array.isArray(product.images)
+      ? product.images.filter(Boolean).map(getImageUrl)
+      : [];
     const characteristics = product.characteristics && typeof product.characteristics === "object"
       ? product.characteristics : {};
     let currentIndex = 0;
