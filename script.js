@@ -45,23 +45,44 @@
     ? `<img class="product-image" src="${escapeHTML(url)}" alt="${escapeHTML(alt)}" loading="lazy" decoding="async">`
     : `<div class="image-placeholder">RUSTOCK</div>`;
 
-    function getImageUrl(url) {
-    if (!url) return "";
-
+  function getImageUrl(url) {
+    if (typeof url !== "string" || !url.trim()) return "";
     try {
-      const imageUrl = new URL(url);
-      const originalHost = "spocaiwbpxwwfymmhdon.supabase.co";
-      const workerUrl = new URL(config.SUPABASE_URL);
-
-      if (imageUrl.hostname === originalHost) {
-        imageUrl.protocol = workerUrl.protocol;
-        imageUrl.host = workerUrl.host;
+      const parsed = new URL(url.trim(), window.location.href);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
+      // Older uploads may have stored the Worker host in their public URL.
+      // Normalize those URLs back to the real Supabase Storage endpoint.
+      if (parsed.hostname === "rustock-api.hujsosite504.workers.dev") {
+        parsed.hostname = "spocaiwbpxwwfymmhdon.supabase.co";
       }
-
-      return imageUrl.href;
+      return parsed.href;
     } catch {
-      return url;
+      return "";
     }
+  }
+
+  function attachImageRecovery(container) {
+    container.querySelectorAll("img").forEach(image => {
+      image.addEventListener("error", () => {
+        const attempts = Number(image.dataset.retryCount || 0);
+        if (attempts < 2 && image.src) {
+          image.dataset.retryCount = String(attempts + 1);
+          const original = image.src;
+          window.setTimeout(() => {
+            if (!image.isConnected) return;
+            image.src = "";
+            image.src = original + (original.includes("?") ? "&" : "?") + "rustock_retry=" + Date.now();
+          }, 450 * (attempts + 1));
+          return;
+        }
+        const placeholder = document.createElement("div");
+        placeholder.className = "image-placeholder";
+        placeholder.textContent = "RUSTOCK";
+        placeholder.setAttribute("role", "img");
+        placeholder.setAttribute("aria-label", image.alt || "Изображение товара недоступно");
+        image.replaceWith(placeholder);
+      });
+    });
   }
 
   function safeSearchTerm(value) {
@@ -130,6 +151,13 @@
     updateClearButton();
     renderPagination();
 
+    attachImageRecovery(productsEl);
+    productsEl.querySelectorAll(".product-card .product-image").forEach((image, index) => {
+      if (index < 4) {
+        image.loading = "eager";
+        image.fetchPriority = "high";
+      }
+    });
     productsEl.querySelectorAll(".product-card").forEach(card => {
       const open = () => {
         const product = pageProducts.find(item => String(item.id) === card.dataset.id);
@@ -285,6 +313,7 @@
         </div>
       </div>`;
 
+    attachImageRecovery(detailsEl);
     const gallery = detailsEl.querySelector(".detail-gallery");
     const mainImage = detailsEl.querySelector("#detail-main-image");
     const counter = detailsEl.querySelector(".detail-gallery-counter");
@@ -341,6 +370,36 @@
     else dialog.setAttribute("open", "");
   }
 
+  async function runQueryWithRetry(queryFactory, attempts = 2) {
+    let lastError;
+    for (let attempt = 0; attempt <= attempts; attempt++) {
+      let timeoutId;
+      try {
+        const result = await Promise.race([
+          queryFactory(),
+          new Promise((_, reject) => {
+            timeoutId = window.setTimeout(
+              () => reject(new Error("Превышено время ожидания Supabase")),
+              12000
+            );
+          })
+        ]);
+        window.clearTimeout(timeoutId);
+        if (result.error) throw result.error;
+        return result;
+      } catch (error) {
+        window.clearTimeout(timeoutId);
+        lastError = error;
+        if (attempt >= attempts) break;
+        const message = String(error?.message || error || "").toLowerCase();
+        const transient = /timeout|network|fetch|failed to|temporar|502|503|504|gateway|connection/.test(message);
+        if (!transient) break;
+        await new Promise(resolve => window.setTimeout(resolve, 350 * (attempt + 1)));
+      }
+    }
+    throw lastError || new Error("Не удалось загрузить каталог");
+  }
+
   async function loadCatalog() {
     if (!configured()) {
       countEl.textContent = "Supabase ещё не настроен";
@@ -385,18 +444,8 @@
           query = query.order("created_at", { ascending: false }).order("id", { ascending: true });
       }
 
-      const {data,error,count} = await Promise.race([
-        query.range(from, to),
-        new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error("Превышено время ожидания Supabase")),
-            10000
-          )
-        )
-      ]);
-      
+      const { data, count } = await runQueryWithRetry(() => query.range(from, to));
       if (sequence !== requestSequence) return;
-      if (error) throw error;
 
       totalProducts = count || 0;
       const maxPage = Math.max(1, Math.ceil(totalProducts / pageSize));
