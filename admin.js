@@ -24,44 +24,19 @@
   let totalAdminProducts = 0;
   let listRequestSequence = 0;
 
-  function storageImageUrl(value) {
-    if (typeof value !== "string" || !value.trim()) return "";
-    try {
-      const url = new URL(value.trim(), window.location.href);
-      if (url.hostname === "rustock-api.hujsosite504.workers.dev") {
-        url.hostname = "spocaiwbpxwwfymmhdon.supabase.co";
-      }
-      return (url.protocol === "https:" || url.protocol === "http:") ? url.href : "";
-    } catch {
-      return "";
-    }
-  }
-
-  function attachAdminImageRecovery(container) {
-    container.querySelectorAll("img").forEach(image => {
-      image.addEventListener("error", () => {
-        const attempts = Number(image.dataset.retryCount || 0);
-        if (attempts < 2) {
-          image.dataset.retryCount = String(attempts + 1);
-          const original = image.src;
-          window.setTimeout(() => {
-            if (!image.isConnected) return;
-            image.src = original + (original.includes("?") ? "&" : "?") + "rustock_retry=" + Date.now();
-          }, 450 * (attempts + 1));
-          return;
-        }
-        const placeholder = document.createElement("div");
-        placeholder.className = "image-placeholder";
-        placeholder.textContent = "RUSTOCK";
-        image.replaceWith(placeholder);
-      });
-    });
-  }
-
   const escapeHTML = (value = "") => String(value).replace(/[&<>"']/g, char => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   })[char]);
   const money = value => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Number(value) || 0) + " ₽";
+  const normalizeImageUrl = value => {
+    if (typeof value !== "string" || !value.trim()) return "";
+    try {
+      const url = new URL(value, window.location.href);
+      if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+      if (url.hostname === "spocaiwbpxwwfymmhdon.supabase.co") url.hostname = "rustock-api.hujsosite504.workers.dev";
+      return url.href;
+    } catch { return ""; }
+  };
   const setMessage = (el, text, kind = "") => {
     el.textContent = text;
     el.className = "admin-message" + (kind ? " " + kind : "");
@@ -181,9 +156,9 @@
       return;
     }
     productsList.innerHTML = products.map(product => {
-      const image = Array.isArray(product.images) ? product.images[0] : "";
+      const image = Array.isArray(product.images) ? normalizeImageUrl(product.images[0]) : "";
       return `<article class="admin-product">
-        ${image ? `<img src="${escapeHTML(storageImageUrl(image))}" alt="" loading="lazy" decoding="async">` : `<div class="image-placeholder">RUSTOCK</div>`}
+        ${image ? `<img src="${escapeHTML(image)}" alt="" loading="lazy" decoding="async">` : `<div class="image-placeholder">RUSTOCK</div>`}
 <div>
   <h3>${escapeHTML(product.name)}</h3>
   <p>${money(product.price)} · ${product.available ? "В наличии" : "Под заказ"}</p>
@@ -195,7 +170,6 @@
       </article>`;
     }).join("");
 
-    attachAdminImageRecovery(productsList);
     productsList.querySelectorAll("[data-edit]").forEach(button => button.addEventListener("click", () => {
       const product = products.find(item => String(item.id) === button.dataset.edit);
       if (product) editProduct(product);
@@ -213,10 +187,9 @@
     }
     currentImagesEl.innerHTML = currentImages.map((url, index) => `
       <div class="current-image">
-        <img src="${escapeHTML(storageImageUrl(url))}" alt="Фото ${index + 1}" loading="lazy" decoding="async">
+        <img src="${escapeHTML(normalizeImageUrl(url))}" alt="Фото ${index + 1}" loading="lazy" decoding="async">
         <button type="button" data-remove-image="${index}" aria-label="Убрать фото">×</button>
       </div>`).join("");
-    attachAdminImageRecovery(currentImagesEl);
     currentImagesEl.querySelectorAll("[data-remove-image]").forEach(button => button.addEventListener("click", () => {
       currentImages.splice(Number(button.dataset.removeImage), 1);
       renderCurrentImages();
@@ -231,7 +204,7 @@
     $("characteristics").value = Object.entries(product.characteristics || {}).map(([key, value]) => `${key}: ${value}`).join("\n");
     $("available").checked = product.available === true;
     $("images").value = "";
-    currentImages = Array.isArray(product.images) ? [...product.images] : [];
+    currentImages = Array.isArray(product.images) ? product.images.map(normalizeImageUrl).filter(Boolean) : [];
     renderCurrentImages();
     $("form-title").textContent = "Редактировать товар";
     $("save-button").textContent = "Сохранить изменения";

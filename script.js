@@ -50,9 +50,10 @@
     try {
       const parsed = new URL(url.trim(), window.location.href);
       if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
-      // Repair links saved while the temporary Worker URL was being used.
-      if (parsed.hostname === "rustock-api.hujsosite504.workers.dev") {
-        parsed.hostname = "spocaiwbpxwwfymmhdon.supabase.co";
+      // Route both legacy direct Supabase URLs and new public Storage URLs through
+      // the same Worker so mobile networks use one consistent endpoint.
+      if (parsed.hostname === "spocaiwbpxwwfymmhdon.supabase.co") {
+        parsed.hostname = "rustock-api.hujsosite504.workers.dev";
       }
       return parsed.href;
     } catch {
