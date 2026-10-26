@@ -1,5 +1,38 @@
 (() => {
   const config = window.RUSTOCK_CONFIG || {};
+
+  // Try the configured Worker first, then the direct Supabase endpoint. This
+  // allows networks where one route is filtered to use the other route.
+  function createResilientFetch() {
+    const workerOrigin = String(config.SUPABASE_URL || "").replace(/\/$/, "");
+    const directOrigin = "https://spocaiwbpxwwfymmhdon.supabase.co";
+    return async (input, init) => {
+      const original = input instanceof Request ? input : new Request(input, init);
+      const originalUrl = new URL(original.url);
+      const workerHost = new URL(workerOrigin).host;
+      const isSupabaseRoute = originalUrl.host === workerHost || originalUrl.host === new URL(directOrigin).host;
+      if (!isSupabaseRoute) return fetch(original, init);
+      const candidates = [];
+      if (originalUrl.host === workerHost) candidates.push(originalUrl.href);
+      const directUrl = new URL(originalUrl.href);
+      directUrl.host = new URL(directOrigin).host;
+      directUrl.protocol = "https:";
+      if (!candidates.includes(directUrl.href)) candidates.push(directUrl.href);
+      let lastError;
+      for (const candidate of candidates) {
+        try {
+          const headers = new Headers(original.headers);
+          headers.set("apikey", config.SUPABASE_ANON_KEY);
+          const request = new Request(candidate, { method: original.method, headers, body: ["GET", "HEAD"].includes(original.method) ? undefined : original.clone().body, redirect: "follow", credentials: "omit", cache: "no-store" });
+          const response = await fetch(request);
+          if (response.status < 500 && ![403, 429].includes(response.status)) return response;
+          lastError = new Error(`Supabase endpoint returned ${response.status}`);
+        } catch (error) { lastError = error; }
+      }
+      throw lastError || new Error("No Supabase endpoint could be reached");
+    };
+  }
+
   const configured = () =>
     config.SUPABASE_URL && config.SUPABASE_ANON_KEY &&
     !config.SUPABASE_URL.includes("ВСТАВЬТЕ") &&
@@ -47,7 +80,7 @@
     loginForm.querySelector("button[type=submit]").disabled = true;
     return;
   }
-  supabase = window.supabase.createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY);
+  supabase = window.supabase.createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY, { global: { fetch: createResilientFetch() } });
 
   loginForm.addEventListener("submit", async event => {
     event.preventDefault();
@@ -99,7 +132,7 @@
     const to = from + adminPageSize - 1;
     const { data, error, count } = await supabase
       .from("products")
-      .select("*", { count: "exact" })
+      .select("*", { count: "planned" })
       .order("created_at", { ascending: false })
       .order("id", { ascending: true })
       .range(from, to);

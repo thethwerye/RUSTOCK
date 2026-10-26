@@ -22,6 +22,39 @@
   let requestSequence = 0;
   let searchTimer = null;
 
+
+  // Try the configured Worker first, then the direct Supabase endpoint. This
+  // allows networks where one route is filtered to use the other route.
+  function createResilientFetch() {
+    const workerOrigin = String(config.SUPABASE_URL || "").replace(/\/$/, "");
+    const directOrigin = "https://spocaiwbpxwwfymmhdon.supabase.co";
+    return async (input, init) => {
+      const original = input instanceof Request ? input : new Request(input, init);
+      const originalUrl = new URL(original.url);
+      const workerHost = new URL(workerOrigin).host;
+      const isSupabaseRoute = originalUrl.host === workerHost || originalUrl.host === new URL(directOrigin).host;
+      if (!isSupabaseRoute) return fetch(original, init);
+      const candidates = [];
+      if (originalUrl.host === workerHost) candidates.push(originalUrl.href);
+      const directUrl = new URL(originalUrl.href);
+      directUrl.host = new URL(directOrigin).host;
+      directUrl.protocol = "https:";
+      if (!candidates.includes(directUrl.href)) candidates.push(directUrl.href);
+      let lastError;
+      for (const candidate of candidates) {
+        try {
+          const headers = new Headers(original.headers);
+          headers.set("apikey", config.SUPABASE_ANON_KEY);
+          const request = new Request(candidate, { method: original.method, headers, body: ["GET", "HEAD"].includes(original.method) ? undefined : original.clone().body, redirect: "follow", credentials: "omit", cache: "no-store" });
+          const response = await fetch(request);
+          if (response.status < 500 && ![403, 429].includes(response.status)) return response;
+          lastError = new Error(`Supabase endpoint returned ${response.status}`);
+        } catch (error) { lastError = error; }
+      }
+      throw lastError || new Error("No Supabase endpoint could be reached");
+    };
+  }
+
   const configured = () =>
     Boolean(
       config.SUPABASE_URL &&
@@ -65,7 +98,13 @@
     container.querySelectorAll("img").forEach(image => {
       image.addEventListener("error", () => {
         const attempts = Number(image.dataset.retryCount || 0);
-        if (attempts < 3 && image.src) {
+        if (attempts === 0 && image.src.includes("rustock-api.hujsosite504.workers.dev")) {
+          image.dataset.retryCount = "1";
+          const direct = image.src.replace("rustock-api.hujsosite504.workers.dev", "spocaiwbpxwwfymmhdon.supabase.co");
+          image.src = direct;
+          return;
+        }
+        if (attempts < 4 && image.src) {
           image.dataset.retryCount = String(attempts + 1);
           const original = image.src.split("&rustock_retry=")[0].split("?rustock_retry=")[0];
           window.setTimeout(() => {
@@ -227,6 +266,13 @@
       const image = lightbox.querySelector(".image-lightbox-image");
       const counter = lightbox.querySelector(".image-lightbox-counter");
       image.dataset.retryCount = "0";
+      image.dataset.retryCount = "0";
+      image.onerror = () => {
+        if (image.dataset.retryCount === "0" && image.src.includes("rustock-api.hujsosite504.workers.dev")) {
+          image.dataset.retryCount = "1";
+          image.src = image.src.replace("rustock-api.hujsosite504.workers.dev", "spocaiwbpxwwfymmhdon.supabase.co");
+        }
+      };
       image.src = getImageUrl(lightbox._images[lightbox._index]);
       image.alt = `${lightbox._productName} — фото ${lightbox._index + 1}`;
       counter.textContent = `${lightbox._index + 1} / ${lightbox._images.length}`;
@@ -362,7 +408,7 @@
       const from = (currentPage - 1) * pageSize;
       const to = from + pageSize - 1;
       const columns = "id,name,price,short_description,description,characteristics,images,available,created_at";
-      let query = supabase.from("products").select(columns, { count: "exact" });
+      let query = supabase.from("products").select(columns, { count: "planned" });
 
       if (activeFilter === "available") query = query.eq("available", true);
       if (activeFilter === "order") query = query.eq("available", false);
@@ -486,7 +532,8 @@
 
   if (configured() && window.supabase?.createClient) {
     supabase = window.supabase.createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { fetch: createResilientFetch() }
     });
     loadCatalog();
   } else {
