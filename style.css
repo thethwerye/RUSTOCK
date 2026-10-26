@@ -813,3 +813,18 @@ select {
     right: max(7px, env(safe-area-inset-right));
   }
 }
+
+/* Mobile gallery and focus-state fixes */
+.product-card,
+.product-card:focus,
+.product-card:focus-visible,
+.product-card:focus:not(:focus-visible) {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+.product-card:focus-visible .product-image-wrap { outline: none !important; }
+.image-lightbox { touch-action: pan-y; overscroll-behavior: contain; }
+.image-lightbox-image { touch-action: pan-y; -webkit-user-drag: none; }
+.image-lightbox button:focus,
+.image-lightbox button:focus-visible,
+.image-lightbox button:active { outline: none !important; box-shadow: none !important; }

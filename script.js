@@ -45,13 +45,12 @@
     ? `<img class="product-image" src="${escapeHTML(url)}" alt="${escapeHTML(alt)}" loading="lazy" decoding="async">`
     : `<div class="image-placeholder">RUSTOCK</div>`;
 
-  function getImageUrl(url) {
+    function getImageUrl(url) {
     if (typeof url !== "string" || !url.trim()) return "";
     try {
       const parsed = new URL(url.trim(), window.location.href);
       if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
-      // Older uploads may have stored the Worker host in their public URL.
-      // Normalize those URLs back to the real Supabase Storage endpoint.
+      // Repair links saved while the temporary Worker URL was being used.
       if (parsed.hostname === "rustock-api.hujsosite504.workers.dev") {
         parsed.hostname = "spocaiwbpxwwfymmhdon.supabase.co";
       }
@@ -65,14 +64,13 @@
     container.querySelectorAll("img").forEach(image => {
       image.addEventListener("error", () => {
         const attempts = Number(image.dataset.retryCount || 0);
-        if (attempts < 2 && image.src) {
+        if (attempts < 3 && image.src) {
           image.dataset.retryCount = String(attempts + 1);
-          const original = image.src;
+          const original = image.src.split("&rustock_retry=")[0].split("?rustock_retry=")[0];
           window.setTimeout(() => {
             if (!image.isConnected) return;
-            image.src = "";
             image.src = original + (original.includes("?") ? "&" : "?") + "rustock_retry=" + Date.now();
-          }, 450 * (attempts + 1));
+          }, 350 * (attempts + 1));
           return;
         }
         const placeholder = document.createElement("div");
@@ -150,14 +148,8 @@
     emptyEl.hidden = totalProducts !== 0;
     updateClearButton();
     renderPagination();
-
     attachImageRecovery(productsEl);
-    productsEl.querySelectorAll(".product-card .product-image").forEach((image, index) => {
-      if (index < 4) {
-        image.loading = "eager";
-        image.fetchPriority = "high";
-      }
-    });
+
     productsEl.querySelectorAll(".product-card").forEach(card => {
       const open = () => {
         const product = pageProducts.find(item => String(item.id) === card.dataset.id);
@@ -174,100 +166,83 @@
   }
 
   function openImageLightbox(images, startIndex, productName) {
-  if (!Array.isArray(images) || !images.length) return;
+    if (!Array.isArray(images) || !images.length) return;
 
-  let lightbox = document.getElementById("image-lightbox");
+    let lightbox = document.getElementById("image-lightbox");
+    if (!lightbox) {
+      lightbox = document.createElement("dialog");
+      lightbox.id = "image-lightbox";
+      lightbox.className = "image-lightbox";
+      lightbox.setAttribute("aria-label", "Просмотр фотографий");
+      lightbox.innerHTML = `
+        <button class="image-lightbox-close" type="button" aria-label="Закрыть фотографию">×</button>
+        <button class="image-lightbox-prev" type="button" aria-label="Предыдущее фото">‹</button>
+        <img class="image-lightbox-image" alt="" draggable="false">
+        <button class="image-lightbox-next" type="button" aria-label="Следующее фото">›</button>
+        <div class="image-lightbox-counter"></div>`;
+      document.body.appendChild(lightbox);
 
-  if (!lightbox) {
-    lightbox = document.createElement("dialog");
-    lightbox.id = "image-lightbox";
-    lightbox.className = "image-lightbox";
-    lightbox.setAttribute("aria-label", "Просмотр фотографий");
-
-    lightbox.innerHTML = `
-      <button class="image-lightbox-close" type="button"
-        aria-label="Закрыть фотографию">×</button>
-
-      <button class="image-lightbox-prev" type="button"
-        aria-label="Предыдущее фото">‹</button>
-
-      <img class="image-lightbox-image" alt="">
-
-      <button class="image-lightbox-next" type="button"
-        aria-label="Следующее фото">›</button>
-
-      <div class="image-lightbox-counter"></div>
-    `;
-
-    document.body.appendChild(lightbox);
-
-    lightbox.querySelector(".image-lightbox-close")
-      .addEventListener("click", () => lightbox.close());
-
-    lightbox.querySelector(".image-lightbox-prev")
-      .addEventListener("click", () => {
-        lightbox._index =
-          (lightbox._index - 1 + lightbox._images.length)
-          % lightbox._images.length;
+      const previous = () => {
+        lightbox._index = (lightbox._index - 1 + lightbox._images.length) % lightbox._images.length;
         updateLightbox();
+      };
+      const next = () => {
+        lightbox._index = (lightbox._index + 1) % lightbox._images.length;
+        updateLightbox();
+      };
+      lightbox.querySelector(".image-lightbox-close").addEventListener("click", () => lightbox.close());
+      lightbox.querySelector(".image-lightbox-prev").addEventListener("click", previous);
+      lightbox.querySelector(".image-lightbox-next").addEventListener("click", next);
+      lightbox.addEventListener("click", event => { if (event.target === lightbox) lightbox.close(); });
+      lightbox.addEventListener("keydown", event => {
+        if (event.key === "ArrowLeft") { event.preventDefault(); previous(); }
+        if (event.key === "ArrowRight") { event.preventDefault(); next(); }
+        if (event.key === "Escape" && !lightbox.open) lightbox.removeAttribute("open");
       });
 
-    lightbox.querySelector(".image-lightbox-next")
-      .addEventListener("click", () => {
-        lightbox._index =
-          (lightbox._index + 1) % lightbox._images.length;
-        updateLightbox();
-      });
+      // Reliable touch swipe for iOS Safari and Android browsers.
+      let touchStartX = 0;
+      let touchStartY = 0;
+      lightbox.addEventListener("touchstart", event => {
+        if (!event.changedTouches.length) return;
+        touchStartX = event.changedTouches[0].clientX;
+        touchStartY = event.changedTouches[0].clientY;
+      }, { passive: true });
+      lightbox.addEventListener("touchend", event => {
+        if (!event.changedTouches.length || lightbox._images.length < 2) return;
+        const dx = event.changedTouches[0].clientX - touchStartX;
+        const dy = event.changedTouches[0].clientY - touchStartY;
+        if (Math.abs(dx) >= 42 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+          if (dx < 0) next(); else previous();
+        }
+      }, { passive: true });
+    }
 
-    lightbox.addEventListener("click", event => {
-      if (event.target === lightbox) lightbox.close();
-    });
+    lightbox._images = images;
+    lightbox._index = Math.max(0, Math.min(Number(startIndex) || 0, images.length - 1));
+    lightbox._productName = productName || "Товар";
 
-    lightbox.addEventListener("keydown", event => {
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        lightbox.querySelector(".image-lightbox-prev").click();
-      }
+    function updateLightbox() {
+      const image = lightbox.querySelector(".image-lightbox-image");
+      const counter = lightbox.querySelector(".image-lightbox-counter");
+      image.dataset.retryCount = "0";
+      image.src = getImageUrl(lightbox._images[lightbox._index]);
+      image.alt = `${lightbox._productName} — фото ${lightbox._index + 1}`;
+      counter.textContent = `${lightbox._index + 1} / ${lightbox._images.length}`;
+      const multiple = lightbox._images.length > 1;
+      lightbox.querySelector(".image-lightbox-prev").hidden = !multiple;
+      lightbox.querySelector(".image-lightbox-next").hidden = !multiple;
+      counter.hidden = !multiple;
+    }
 
-      if (event.key === "ArrowRight") {
-        event.preventDefault();
-        lightbox.querySelector(".image-lightbox-next").click();
-      }
-    });
+    updateLightbox();
+    if (typeof lightbox.showModal === "function") {
+      if (!lightbox.open) lightbox.showModal();
+    } else {
+      lightbox.setAttribute("open", "");
+      lightbox.style.display = "flex";
+    }
   }
-
-  lightbox._images = images;
-  lightbox._index = Math.max(
-    0,
-    Math.min(startIndex, images.length - 1)
-  );
-  lightbox._productName = productName || "Товар";
-
-  function updateLightbox() {
-    const image = lightbox.querySelector(".image-lightbox-image");
-    const counter = lightbox.querySelector(".image-lightbox-counter");
-
-    image.src = getImageUrl(lightbox._images[lightbox._index]);
-    image.alt =
-      `${lightbox._productName} — фото ${lightbox._index + 1}`;
-
-    counter.textContent =
-      `${lightbox._index + 1} / ${lightbox._images.length}`;
-
-    const multiple = lightbox._images.length > 1;
-    lightbox.querySelector(".image-lightbox-prev").hidden = !multiple;
-    lightbox.querySelector(".image-lightbox-next").hidden = !multiple;
-    counter.hidden = !multiple;
-  }
-
-  updateLightbox();
-
-  if (typeof lightbox.showModal === "function") {
-    if (!lightbox.open) lightbox.showModal();
-  } else {
-    lightbox.setAttribute("open", "");
-  }
-}
 
   function openProduct(product) {
     const images = Array.isArray(product.images)
@@ -313,7 +288,6 @@
         </div>
       </div>`;
 
-    attachImageRecovery(detailsEl);
     const gallery = detailsEl.querySelector(".detail-gallery");
     const mainImage = detailsEl.querySelector("#detail-main-image");
     const counter = detailsEl.querySelector(".detail-gallery-counter");
@@ -370,36 +344,6 @@
     else dialog.setAttribute("open", "");
   }
 
-  async function runQueryWithRetry(queryFactory, attempts = 2) {
-    let lastError;
-    for (let attempt = 0; attempt <= attempts; attempt++) {
-      let timeoutId;
-      try {
-        const result = await Promise.race([
-          queryFactory(),
-          new Promise((_, reject) => {
-            timeoutId = window.setTimeout(
-              () => reject(new Error("Превышено время ожидания Supabase")),
-              12000
-            );
-          })
-        ]);
-        window.clearTimeout(timeoutId);
-        if (result.error) throw result.error;
-        return result;
-      } catch (error) {
-        window.clearTimeout(timeoutId);
-        lastError = error;
-        if (attempt >= attempts) break;
-        const message = String(error?.message || error || "").toLowerCase();
-        const transient = /timeout|network|fetch|failed to|temporar|502|503|504|gateway|connection/.test(message);
-        if (!transient) break;
-        await new Promise(resolve => window.setTimeout(resolve, 350 * (attempt + 1)));
-      }
-    }
-    throw lastError || new Error("Не удалось загрузить каталог");
-  }
-
   async function loadCatalog() {
     if (!configured()) {
       countEl.textContent = "Supabase ещё не настроен";
@@ -444,8 +388,33 @@
           query = query.order("created_at", { ascending: false }).order("id", { ascending: true });
       }
 
-      const { data, count } = await runQueryWithRetry(() => query.range(from, to));
+      let response;
+      let lastError;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        let timeoutId;
+        try {
+          response = await Promise.race([
+            query.range(from, to),
+            new Promise((_, reject) => {
+              timeoutId = window.setTimeout(() => reject(new Error("Превышено время ожидания Supabase")), 10000);
+            })
+          ]);
+          window.clearTimeout(timeoutId);
+          if (!response.error) break;
+          lastError = response.error;
+          if (attempt === 2) throw lastError;
+        } catch (error) {
+          window.clearTimeout(timeoutId);
+          lastError = error;
+          if (attempt === 2) throw lastError;
+        }
+        await new Promise(resolve => window.setTimeout(resolve, 300 * (attempt + 1)));
+      }
+      const { data, error, count } = response || { data: [], error: lastError, count: 0 };
+      if (error) throw error;
+      
       if (sequence !== requestSequence) return;
+      if (error) throw error;
 
       totalProducts = count || 0;
       const maxPage = Math.max(1, Math.ceil(totalProducts / pageSize));
@@ -458,11 +427,12 @@
       renderProducts();
     } catch (error) {
       if (sequence !== requestSequence) return;
-      pageProducts = [];
-      totalProducts = 0;
-      productsEl.innerHTML = "";
-      paginationEl.hidden = true;
-      countEl.textContent = "Не удалось загрузить каталог";
+      // Keep the last successfully rendered catalog visible during transient network failures.
+      if (!pageProducts.length) {
+        productsEl.innerHTML = "";
+        paginationEl.hidden = true;
+      }
+      countEl.textContent = pageProducts.length ? `Не удалось обновить каталог (${pageProducts.length} товаров показано)` : "Не удалось загрузить каталог";
       statusEl.textContent = `Ошибка Supabase: ${error.message || String(error)}. Проверьте подключение и политики доступа.`;
     } finally {
       if (sequence === requestSequence) productsEl.removeAttribute("aria-busy");
@@ -504,6 +474,13 @@
   });
   dialog.addEventListener("close", () => {
     detailsEl.innerHTML = "";
+    if (document.activeElement && document.activeElement.classList?.contains("product-card")) {
+      document.activeElement.blur();
+    }
+    requestAnimationFrame(() => {
+      const focused = document.querySelector(".product-card:focus");
+      if (focused) focused.blur();
+    });
   });
 
   if (configured() && window.supabase?.createClient) {
