@@ -1,32 +1,9 @@
 (() => {
   const config = window.RUSTOCK_CONFIG || {};
 
-  // Try the configured Worker first, then the direct Supabase endpoint. This
-  // allows networks where one route is filtered to use the other route.
+  // Use a single endpoint. Never wait for a blocked endpoint before trying another.
   function createResilientFetch() {
-    const primary = new URL(config.SUPABASE_URL).origin;
-    const backup = "https://spocaiwbpxwwfymmhdon.supabase.co";
-    return async (input, init) => {
-      const original = new Request(input, init);
-      const url = new URL(original.url);
-      if (![new URL(primary).host, new URL(backup).host].includes(url.host)) return fetch(original);
-      const endpoints = [primary, backup].filter((v, i, a) => a.indexOf(v) === i);
-      let lastError;
-      for (const endpoint of endpoints) {
-        const destination = new URL(original.url);
-        destination.host = new URL(endpoint).host;
-        try {
-          const headers = new Headers(original.headers);
-          headers.set("apikey", config.SUPABASE_ANON_KEY);
-          // Request.clone preserves multipart, Blob and binary Storage uploads on iOS.
-          const request = new Request(original.clone(), { headers });
-          const response = await fetch(new Request(destination.href, request));
-          if (response.status < 500 && response.status !== 429) return response;
-          lastError = new Error(`Сервер вернул HTTP ${response.status}`);
-        } catch (error) { lastError = error; }
-      }
-      throw lastError || new Error("Нет соединения с сервером");
-    };
+    return (input, init) => fetch(input, init);
   }
 
   const configured = () =>
@@ -63,6 +40,9 @@
       const url = new URL(value, window.location.href);
       if (url.protocol !== "https:" && url.protocol !== "http:") return "";
       /* Keep original storage host; avoid unnecessary image proxy. */
+      if (url.hostname === "spocaiwbpxwwfymmhdon.supabase.co" && url.pathname.startsWith("/storage/v1/object/public/")) {
+        return config.SUPABASE_URL.replace(/\/$/, "") + url.pathname + url.search;
+      }
       return url.href;
     } catch { return ""; }
   };

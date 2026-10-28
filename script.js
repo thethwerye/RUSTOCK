@@ -24,32 +24,9 @@
   let searchTimer = null;
 
 
-  // Try the configured Worker first, then the direct Supabase endpoint. This
-  // allows networks where one route is filtered to use the other route.
+  // Use a single endpoint. Never wait for a blocked endpoint before trying another.
   function createResilientFetch() {
-    const primary = new URL(config.SUPABASE_URL).origin;
-    const backup = "https://spocaiwbpxwwfymmhdon.supabase.co";
-    return async (input, init) => {
-      const original = new Request(input, init);
-      const url = new URL(original.url);
-      if (![new URL(primary).host, new URL(backup).host].includes(url.host)) return fetch(original);
-      const endpoints = [primary, backup].filter((v, i, a) => a.indexOf(v) === i);
-      let lastError;
-      for (const endpoint of endpoints) {
-        const destination = new URL(original.url);
-        destination.host = new URL(endpoint).host;
-        try {
-          const headers = new Headers(original.headers);
-          headers.set("apikey", config.SUPABASE_ANON_KEY);
-          // Request.clone preserves multipart, Blob and binary Storage uploads on iOS.
-          const request = new Request(original.clone(), { headers });
-          const response = await fetch(new Request(destination.href, request));
-          if (response.status < 500 && response.status !== 429) return response;
-          lastError = new Error(`Сервер вернул HTTP ${response.status}`);
-        } catch (error) { lastError = error; }
-      }
-      throw lastError || new Error("Нет соединения с сервером");
-    };
+    return (input, init) => fetch(input, init);
   }
 
   const configured = () =>
@@ -83,6 +60,9 @@
       // Route both legacy direct Supabase URLs and new public Storage URLs through
       // the same Worker so mobile networks use one consistent endpoint.
       
+      if (parsed.hostname === "spocaiwbpxwwfymmhdon.supabase.co" && parsed.pathname.startsWith("/storage/v1/object/public/")) {
+        return config.SUPABASE_URL.replace(/\/$/, "") + parsed.pathname + parsed.search;
+      }
       return parsed.href;
     } catch {
       return "";
@@ -414,34 +394,18 @@
           query = query.order("created_at", { ascending: false }).order("id", { ascending: true });
       }
 
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), 8000);
       let response;
-      let lastError;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        let timeoutId;
-        try {
-          response = await Promise.race([
-            query.range(from, to),
-            new Promise((_, reject) => {
-              timeoutId = window.setTimeout(() => reject(new Error("Превышено время ожидания Supabase")), 6500);
-            })
-          ]);
-          window.clearTimeout(timeoutId);
-          if (!response.error) break;
-          lastError = response.error;
-          if (attempt === 1) throw lastError;
-        } catch (error) {
-          window.clearTimeout(timeoutId);
-          lastError = error;
-          if (attempt === 1) throw lastError;
-        }
-        await new Promise(resolve => window.setTimeout(resolve, 300 * (attempt + 1)));
+      try {
+        response = await query.range(from, to).abortSignal(controller.signal);
+      } finally {
+        window.clearTimeout(timer);
       }
-      const { data, error, count } = response || { data: [], error: lastError, count: 0 };
-      if (error) throw error;
-      
-      if (sequence !== requestSequence) return;
+      const { data, error } = response;
       if (error) throw error;
 
+      if (sequence !== requestSequence) return;
       const batch = data || [];
       hasMoreProducts = batch.length > pageSize;
       const visibleBatch = batch.slice(0, pageSize);
