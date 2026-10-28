@@ -19,6 +19,7 @@
   let activeFilter = "all";
   let currentPage = 1;
   let totalProducts = 0;
+  let hasMoreProducts = false;
   let requestSequence = 0;
   let searchTimer = null;
 
@@ -131,7 +132,7 @@
 
   function renderPagination() {
     if (!paginationEl) return;
-    const hasMore = pageProducts.length >= currentPage * pageSize;
+    const hasMore = hasMoreProducts;
     paginationEl.hidden = !hasMore;
     paginationEl.innerHTML = hasMore ? '<button class="pagination-button" type="button" id="load-more-products">Показать ещё</button>' : '';
     paginationEl.querySelector("button")?.addEventListener("click", () => {
@@ -161,9 +162,9 @@
 
     countEl.textContent = totalProducts === 0
       ? "Товаров не найдено"
-      : `Показано ${pageProducts.length} из ${totalProducts} товаров`;
+      : hasMoreProducts ? `Показано ${pageProducts.length} товаров` : `Показано ${pageProducts.length} из ${pageProducts.length} товаров`;
 
-    emptyEl.hidden = totalProducts !== 0;
+    emptyEl.hidden = pageProducts.length !== 0;
     updateClearButton();
     renderPagination();
     attachImageRecovery(productsEl);
@@ -379,12 +380,12 @@
 
     const sequence = ++requestSequence;
     statusEl.textContent = "";
-    countEl.textContent = "Загружаем каталог…";
+    if (!pageProducts.length || currentPage === 1) countEl.textContent = "Загружаем каталог…";
     productsEl.setAttribute("aria-busy", "true");
 
     try {
       const from = (currentPage - 1) * pageSize;
-      const to = from + pageSize - 1;
+      const to = from + pageSize; // Fetch one extra row to detect whether more items exist.
       const columns = "id,name,price,short_description,description,characteristics,images,available,created_at";
       let query = supabase.from("products").select(columns);
 
@@ -415,23 +416,23 @@
 
       let response;
       let lastError;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      for (let attempt = 0; attempt < 2; attempt++) {
         let timeoutId;
         try {
           response = await Promise.race([
             query.range(from, to),
             new Promise((_, reject) => {
-              timeoutId = window.setTimeout(() => reject(new Error("Превышено время ожидания Supabase")), 10000);
+              timeoutId = window.setTimeout(() => reject(new Error("Превышено время ожидания Supabase")), 6500);
             })
           ]);
           window.clearTimeout(timeoutId);
           if (!response.error) break;
           lastError = response.error;
-          if (attempt === 2) throw lastError;
+          if (attempt === 1) throw lastError;
         } catch (error) {
           window.clearTimeout(timeoutId);
           lastError = error;
-          if (attempt === 2) throw lastError;
+          if (attempt === 1) throw lastError;
         }
         await new Promise(resolve => window.setTimeout(resolve, 300 * (attempt + 1)));
       }
@@ -441,13 +442,17 @@
       if (sequence !== requestSequence) return;
       if (error) throw error;
 
-      totalProducts = 0;
-      pageProducts = currentPage === 1 ? (data || []) : [...pageProducts, ...(data || [])];
+      const batch = data || [];
+      hasMoreProducts = batch.length > pageSize;
+      const visibleBatch = batch.slice(0, pageSize);
+      pageProducts = currentPage === 1 ? visibleBatch : [...pageProducts, ...visibleBatch];
+      totalProducts = pageProducts.length + (hasMoreProducts ? 1 : 0);
       renderProducts();
     } catch (error) {
       if (sequence !== requestSequence) return;
       // Keep the last successfully rendered catalog visible during transient network failures.
       if (!pageProducts.length) {
+        emptyEl.hidden = true;
         productsEl.innerHTML = "";
         paginationEl.hidden = true;
       }
