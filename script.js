@@ -395,7 +395,7 @@
       }
 
       const controller = new AbortController();
-      const timer = window.setTimeout(() => controller.abort(), 8000);
+      const timer = window.setTimeout(() => controller.abort(), 15000);
       let response;
       try {
         response = await query.range(from, to).abortSignal(controller.signal);
@@ -421,7 +421,7 @@
         paginationEl.hidden = true;
       }
       countEl.textContent = pageProducts.length ? `Не удалось обновить каталог (${pageProducts.length} товаров показано)` : "Не удалось загрузить каталог";
-      statusEl.textContent = `Ошибка Supabase: ${error.message || String(error)}. Проверьте подключение и политики доступа.`;
+      statusEl.textContent = `Ошибка загрузки: ${error.name === "AbortError" ? "Сервер не ответил за 15 секунд" : (error.message || String(error))}.`;
     } finally {
       if (sequence === requestSequence) productsEl.removeAttribute("aria-busy");
     }

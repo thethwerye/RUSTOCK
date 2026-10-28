@@ -29,6 +29,7 @@
   let adminPage = 1;
   let totalAdminProducts = 0;
   let listRequestSequence = 0;
+  let dashboardLoading = false;
 
   const escapeHTML = (value = "") => String(value).replace(/[&<>"']/g, char => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -90,15 +91,19 @@
   });
 
   supabase.auth.onAuthStateChange((_event, session) => {
-    if (session) setTimeout(() => showDashboard(), 0);
+    if (session && dashboard.hidden && !dashboardLoading) setTimeout(() => showDashboard(), 0);
   });
 
   async function showDashboard() {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
-    authSection.hidden = true;
-    dashboard.hidden = false;
-    await loadProducts();
+    if (dashboardLoading) return;
+    dashboardLoading = true;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      authSection.hidden = true;
+      dashboard.hidden = false;
+      await loadProducts();
+    } finally { dashboardLoading = false; }
   }
 
   async function loadProducts() {
@@ -106,12 +111,15 @@
     productsList.innerHTML = `<p class="muted">Загрузка товаров…</p>`;
     const from = (adminPage - 1) * adminPageSize;
     const to = from + adminPageSize - 1;
-    const { data, error, count } = await supabase
-      .from("products")
-      .select("*", { count: "planned" })
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: true })
-      .range(from, to);
+    let data, error, count;
+    try {
+      ({ data, error, count } = await supabase
+        .from("products")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to + 1));
+    } catch (err) { error = err; }
 
     if (requestId !== listRequestSequence) return;
     if (error) {
@@ -121,14 +129,15 @@
       return;
     }
 
-    totalAdminProducts = count || 0;
+    const hasNextAdminPage = (data || []).length > adminPageSize;
+    totalAdminProducts = (adminPage - 1) * adminPageSize + Math.min((data || []).length, adminPageSize) + (hasNextAdminPage ? 1 : 0);
     const maxPage = Math.max(1, Math.ceil(totalAdminProducts / adminPageSize));
     if (adminPage > maxPage) {
       adminPage = maxPage;
       return loadProducts();
     }
 
-    products = data || [];
+    products = (data || []).slice(0, adminPageSize);
     renderAdminProducts();
     renderAdminPagination();
     setMessage(listMessage, "");
