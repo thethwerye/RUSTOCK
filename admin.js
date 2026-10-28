@@ -4,32 +4,28 @@
   // Try the configured Worker first, then the direct Supabase endpoint. This
   // allows networks where one route is filtered to use the other route.
   function createResilientFetch() {
-    const workerOrigin = String(config.SUPABASE_URL || "").replace(/\/$/, "");
-    const directOrigin = "https://spocaiwbpxwwfymmhdon.supabase.co";
+    const primary = new URL(config.SUPABASE_URL).origin;
+    const backup = "https://spocaiwbpxwwfymmhdon.supabase.co";
     return async (input, init) => {
-      const original = input instanceof Request ? input : new Request(input, init);
-      const originalUrl = new URL(original.url);
-      const workerHost = new URL(workerOrigin).host;
-      const isSupabaseRoute = originalUrl.host === workerHost || originalUrl.host === new URL(directOrigin).host;
-      if (!isSupabaseRoute) return fetch(original, init);
-      const candidates = [];
-      if (originalUrl.host === workerHost) candidates.push(originalUrl.href);
-      const directUrl = new URL(originalUrl.href);
-      directUrl.host = new URL(directOrigin).host;
-      directUrl.protocol = "https:";
-      if (!candidates.includes(directUrl.href)) candidates.push(directUrl.href);
+      const original = new Request(input, init);
+      const url = new URL(original.url);
+      if (![new URL(primary).host, new URL(backup).host].includes(url.host)) return fetch(original);
+      const endpoints = [primary, backup].filter((v, i, a) => a.indexOf(v) === i);
       let lastError;
-      for (const candidate of candidates) {
+      for (const endpoint of endpoints) {
+        const destination = new URL(original.url);
+        destination.host = new URL(endpoint).host;
         try {
           const headers = new Headers(original.headers);
           headers.set("apikey", config.SUPABASE_ANON_KEY);
-          const request = new Request(candidate, { method: original.method, headers, body: ["GET", "HEAD"].includes(original.method) ? undefined : original.clone().body, redirect: "follow", credentials: "omit", cache: "no-store" });
-          const response = await fetch(request);
-          if (response.status < 500 && ![403, 429].includes(response.status)) return response;
-          lastError = new Error(`Supabase endpoint returned ${response.status}`);
+          // Request.clone preserves multipart, Blob and binary Storage uploads on iOS.
+          const request = new Request(original.clone(), { headers });
+          const response = await fetch(new Request(destination.href, request));
+          if (response.status < 500 && response.status !== 429) return response;
+          lastError = new Error(`Сервер вернул HTTP ${response.status}`);
         } catch (error) { lastError = error; }
       }
-      throw lastError || new Error("No Supabase endpoint could be reached");
+      throw lastError || new Error("Нет соединения с сервером");
     };
   }
 
@@ -66,7 +62,7 @@
     try {
       const url = new URL(value, window.location.href);
       if (url.protocol !== "https:" && url.protocol !== "http:") return "";
-      if (url.hostname === "spocaiwbpxwwfymmhdon.supabase.co") url.hostname = "rustock-api.hujsosite504.workers.dev";
+      /* Keep original storage host; avoid unnecessary image proxy. */
       return url.href;
     } catch { return ""; }
   };
@@ -311,11 +307,11 @@
 
   async function uploadImages(filesToUpload) {
     const urls = [];
-    const supportedTypes = ["image/jpeg", "image/png", "image/webp", "image/avif"];
+    const supportedTypes = ["image/jpeg", "image/png", "image/webp", "image/avif", "image/heic", "image/heif"];
 
     try {
       for (const file of filesToUpload) {
-        if (!supportedTypes.includes(file.type)) {
+        if (!supportedTypes.includes(file.type) && !/\.(jpe?g|png|webp|avif|heic|heif)$/i.test(file.name)) {
           throw new Error(`Формат файла «${file.name}» не поддерживается.`);
         }
         if (file.size > 8 * 1024 * 1024) {
@@ -323,10 +319,11 @@
         }
 
         const uploadFile = await optimizeImage(file);
+        if (["image/heic", "image/heif"].includes(uploadFile.type)) throw new Error("Фото HEIC не удалось преобразовать. На iPhone выберите JPEG или включите «Наиболее совместимый» в настройках камеры.");
         const safeName = uploadFile.name.toLowerCase()
           .replace(/[^a-z0-9._-]+/g, "-")
           .replace(/^-+|-+$/g, "") || "image";
-        const path = `${crypto.randomUUID()}-${safeName}`;
+        const path = `${typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}-${safeName}`;
         const { error } = await supabase.storage.from("product-images").upload(path, uploadFile, {
           cacheControl: "31536000",
           upsert: false,

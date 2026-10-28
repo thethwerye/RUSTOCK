@@ -12,7 +12,7 @@
   const dialog = document.getElementById("product-dialog");
   const detailsEl = document.getElementById("product-details");
   const paginationEl = document.getElementById("catalog-pagination");
-  const pageSize = 24;
+  const pageSize = 24; // Items loaded incrementally, not all at once.
 
   let supabase = null;
   let pageProducts = [];
@@ -26,32 +26,28 @@
   // Try the configured Worker first, then the direct Supabase endpoint. This
   // allows networks where one route is filtered to use the other route.
   function createResilientFetch() {
-    const workerOrigin = String(config.SUPABASE_URL || "").replace(/\/$/, "");
-    const directOrigin = "https://spocaiwbpxwwfymmhdon.supabase.co";
+    const primary = new URL(config.SUPABASE_URL).origin;
+    const backup = "https://spocaiwbpxwwfymmhdon.supabase.co";
     return async (input, init) => {
-      const original = input instanceof Request ? input : new Request(input, init);
-      const originalUrl = new URL(original.url);
-      const workerHost = new URL(workerOrigin).host;
-      const isSupabaseRoute = originalUrl.host === workerHost || originalUrl.host === new URL(directOrigin).host;
-      if (!isSupabaseRoute) return fetch(original, init);
-      const candidates = [];
-      if (originalUrl.host === workerHost) candidates.push(originalUrl.href);
-      const directUrl = new URL(originalUrl.href);
-      directUrl.host = new URL(directOrigin).host;
-      directUrl.protocol = "https:";
-      if (!candidates.includes(directUrl.href)) candidates.push(directUrl.href);
+      const original = new Request(input, init);
+      const url = new URL(original.url);
+      if (![new URL(primary).host, new URL(backup).host].includes(url.host)) return fetch(original);
+      const endpoints = [primary, backup].filter((v, i, a) => a.indexOf(v) === i);
       let lastError;
-      for (const candidate of candidates) {
+      for (const endpoint of endpoints) {
+        const destination = new URL(original.url);
+        destination.host = new URL(endpoint).host;
         try {
           const headers = new Headers(original.headers);
           headers.set("apikey", config.SUPABASE_ANON_KEY);
-          const request = new Request(candidate, { method: original.method, headers, body: ["GET", "HEAD"].includes(original.method) ? undefined : original.clone().body, redirect: "follow", credentials: "omit", cache: "no-store" });
-          const response = await fetch(request);
-          if (response.status < 500 && ![403, 429].includes(response.status)) return response;
-          lastError = new Error(`Supabase endpoint returned ${response.status}`);
+          // Request.clone preserves multipart, Blob and binary Storage uploads on iOS.
+          const request = new Request(original.clone(), { headers });
+          const response = await fetch(new Request(destination.href, request));
+          if (response.status < 500 && response.status !== 429) return response;
+          lastError = new Error(`Сервер вернул HTTP ${response.status}`);
         } catch (error) { lastError = error; }
       }
-      throw lastError || new Error("No Supabase endpoint could be reached");
+      throw lastError || new Error("Нет соединения с сервером");
     };
   }
 
@@ -85,9 +81,7 @@
       if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
       // Route both legacy direct Supabase URLs and new public Storage URLs through
       // the same Worker so mobile networks use one consistent endpoint.
-      if (parsed.hostname === "spocaiwbpxwwfymmhdon.supabase.co") {
-        parsed.hostname = "rustock-api.hujsosite504.workers.dev";
-      }
+      
       return parsed.href;
     } catch {
       return "";
@@ -137,28 +131,12 @@
 
   function renderPagination() {
     if (!paginationEl) return;
-    const pages = Math.max(1, Math.ceil(totalProducts / pageSize));
-    if (totalProducts <= pageSize) {
-      paginationEl.innerHTML = "";
-      paginationEl.hidden = true;
-      return;
-    }
-
-    paginationEl.hidden = false;
-    paginationEl.innerHTML = `
-      <button class="pagination-button" type="button" data-page="${currentPage - 1}" ${currentPage <= 1 ? "disabled" : ""} aria-label="Предыдущая страница">← Назад</button>
-      <span class="pagination-label">Страница ${currentPage} из ${pages}</span>
-      <button class="pagination-button" type="button" data-page="${currentPage + 1}" ${currentPage >= pages ? "disabled" : ""} aria-label="Следующая страница">Далее →</button>
-    `;
-
-    paginationEl.querySelectorAll("[data-page]").forEach(button => {
-      button.addEventListener("click", () => {
-        const nextPage = Number(button.dataset.page);
-        if (nextPage < 1 || nextPage > pages || nextPage === currentPage) return;
-        currentPage = nextPage;
-        loadCatalog();
-        window.scrollTo({ top: productsEl.getBoundingClientRect().top + window.scrollY - 24, behavior: "smooth" });
-      });
+    const hasMore = pageProducts.length >= currentPage * pageSize;
+    paginationEl.hidden = !hasMore;
+    paginationEl.innerHTML = hasMore ? '<button class="pagination-button" type="button" id="load-more-products">Показать ещё</button>' : '';
+    paginationEl.querySelector("button")?.addEventListener("click", () => {
+      currentPage++;
+      loadCatalog();
     });
   }
 
@@ -408,7 +386,7 @@
       const from = (currentPage - 1) * pageSize;
       const to = from + pageSize - 1;
       const columns = "id,name,price,short_description,description,characteristics,images,available,created_at";
-      let query = supabase.from("products").select(columns, { count: "planned" });
+      let query = supabase.from("products").select(columns);
 
       if (activeFilter === "available") query = query.eq("available", true);
       if (activeFilter === "order") query = query.eq("available", false);
@@ -463,14 +441,8 @@
       if (sequence !== requestSequence) return;
       if (error) throw error;
 
-      totalProducts = count || 0;
-      const maxPage = Math.max(1, Math.ceil(totalProducts / pageSize));
-      if (currentPage > maxPage) {
-        currentPage = maxPage;
-        return loadCatalog();
-      }
-
-      pageProducts = data || [];
+      totalProducts = 0;
+      pageProducts = currentPage === 1 ? (data || []) : [...pageProducts, ...(data || [])];
       renderProducts();
     } catch (error) {
       if (sequence !== requestSequence) return;
